@@ -1,0 +1,90 @@
+#!/bin/ksh
+# $Id: webstream,v 1.2 2012/09/26 21:52:01 fab Exp fab $
+
+TMPDIR=${TMPDIR:-/tmp}
+PIDFILE=${TMPDIR}/webstream.pid
+
+progname()
+{
+	basename $0
+}
+
+usage()
+{
+	printf "usage: %s <stream>|off\n" "$(progname)"
+	print "  <stream>\tplay specified webstream"
+	print "  off\t\tstop playing"
+	printf "\ncalled without arguments %s shows the available streams\n\n" "$(progname)"
+	exit 1
+}
+
+is_running() {
+	[[ -e ${PIDFILE} ]] || return 1
+	return 0
+}
+
+chk_args()
+{
+	typeset _target
+	typeset _stream
+	_target=$1
+
+	[[ -n "$_target" ]] || usage
+	[[ -r "${HOME}/.webstream.conf" ]] || \
+	    { echo "no config found." ; exit 3 ;}
+
+	_stream=$(grep "^$_target=" ${HOME}/.webstream.conf | cut -f2 -d'=')
+	[[ -z "${_stream}" ]] && return 1
+
+	CMD=$(grep "^$_target=" ${HOME}/.webstream.conf | cut -f3 -d'=')
+	CMD=${CMD:-/usr/local/bin/mpg321}
+	[[ -s ${CMD} ]] || \
+	    { printf "%s: %s does not exist\n" "$(progname)" "$CMD" ; exit 5 ;}
+	[[ -x ${CMD} ]] || \
+	    { printf "%s: %s not executable\n" "$(progname)" "$CMD" ; exit 5 ;}
+	STREAM=$_stream
+	return 0
+}
+
+stopstream()
+{
+	is_running || { echo "not running?" ; exit 2 ;}
+	pkill -f "$(head -1 ${PIDFILE})"
+	rm -- "${PIDFILE}"
+}
+
+list()
+{
+	typeset cur
+	[[ -r "${HOME}/.webstream.conf" ]] || \
+	    { echo "no config found." ; exit 3 ;}
+	[[ -r ${PIDFILE} ]] && \
+	    cur="$(tail -1 ${PIDFILE} | sed 's/[][\.*^$/]/\\&/g')"
+	sed -e "/^cmd=/d;/^${cur}=/s/^\(${cur}\)=.*/\1 (now playing)/" ${HOME}/.webstream.conf |\
+	    cut -f1 -d'=' | sort
+}
+
+
+[[ -r "${HOME}/.webstream.conf" ]] || \
+    { echo "no config found." ; exit 3 ;}
+
+case "$1" in
+	'now')
+		tail -1 ${PIDFILE} | sed 's/[][\.*^$/]/\\&/g'
+		;;
+	'off')
+		stopstream
+		;;
+	*)	
+		if [[ -z "$1" ]];
+		then
+			list
+		else
+			STATION=$1
+			chk_args $STATION || usage
+			is_running && stopstream
+			${CMD} -q "${STREAM}" >/dev/null 2>&1 &
+			printf "%s -q %s\n%s\n" "$(basename ${CMD})" "$STREAM" "$STATION" > ${PIDFILE}
+		fi
+		;;
+esac
